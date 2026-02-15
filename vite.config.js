@@ -3,8 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/screen-recorder/', // 如果是用户页面，格式为 /[仓库名]/
-  server: {
-    port: 3000
-  }
+  base: '/screen-recorder/',  // 注意：这里要改成你的仓库名
 })

@@ -3,44 +3,37 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'  # 启用缓存以加速安装
-
+          node-version: 18
+          
+      # 修改这里：将 npm ci 改为 npm install
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then
-            echo "Found package-lock.json, using npm ci"
-            npm ci
-          else
-            echo "No package-lock.json found, using npm install"
-            npm install
-          fi
-
+        run: npm install
+        
       - name: Build project
         run: npm run build
-        env:
-          CI: false  # 将警告视为警告而不是错误
-          GENERATE_SOURCEMAP: false  # 可选：禁用sourcemap以减小构建大小
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        
+      - uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'Deploy to GitHub Pages'
+          path: ./dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

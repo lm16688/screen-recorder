@@ -1,0 +1,10 @@
+{
+  "files": {
+    "main.js": "/screen-recorder/static/js/main.4c5196db.js",
+    "index.html": "/screen-recorder/index.html",
+    "main.4c5196db.js.map": "/screen-recorder/static/js/main.4c5196db.js.map"
+  },
+  "entrypoints": [
+    "static/js/main.4c5196db.js"
+  ]
+}

@@ -1,57 +1,111 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Square, Monitor, Maximize, Edit3, Play, Pause, Download, Trash2, Settings, Mic, MicOff, Video, VideoOff, Circle, Move, Layers, Wand2, Globe, FileText, Workflow } from 'lucide-react';
+import { Camera, Square, Monitor, Maximize, Edit3, Play, Pause, Download, Trash2, Mic, MicOff, Move, X, Minimize2, Hand, MousePointer, Type, Minus, ArrowRight, Eraser, Circle as CircleIcon, Undo, Redo, Trash, ChevronDown } from 'lucide-react';
 
 const ScreenRecorder = () => {
-  const [recordingMode, setRecordingMode] = useState('screen'); // screen, window, area, camera
+  // Recording states
+  const [recordingMode, setRecordingMode] = useState('screen');
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [showWhiteboard, setShowWhiteboard] = useState(false);
-  const [whiteboardContent, setWhiteboardContent] = useState('');
-  const [showCamera, setShowCamera] = useState(false);
-  const [cameraShape, setCameraShape] = useState('circle'); // circle or square
-  const [cameraPosition, setCameraPosition] = useState({ x: 20, y: 20 });
-  const [isDraggingCamera, setIsDraggingCamera] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
-  const [selectedArea, setSelectedArea] = useState(null);
-  const [isSelectingArea, setIsSelectingArea] = useState(false);
-  const [backgroundRemoval, setBackgroundRemoval] = useState(false);
-  const [whiteboardMode, setWhiteboardMode] = useState('text'); // text, pointer, ai
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [flowchartData, setFlowchartData] = useState(null);
-  const [embeddedUrl, setEmbeddedUrl] = useState('');
   
+  // Camera states
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [cameraShape, setCameraShape] = useState('circle');
+  const [cameraPosition, setCameraPosition] = useState({ x: 50, y: 50 });
+  const [cameraSize, setCameraSize] = useState(200);
+  const [isDraggingCamera, setIsDraggingCamera] = useState(false);
+  
+  // Area selection states
+  const [isSelectingArea, setIsSelectingArea] = useState(false);
+  const [selectionStart, setSelectionStart] = useState(null);
+  const [selectionEnd, setSelectionEnd] = useState(null);
+  const [selectedArea, setSelectedArea] = useState(null);
+  
+  // Whiteboard states
+  const [showWhiteboard, setShowWhiteboard] = useState(false);
+  const [whiteboardTool, setWhiteboardTool] = useState('select');
+  const [strokeColor, setStrokeColor] = useState('#000000');
+  const [strokeWidth, setStrokeWidth] = useState(2);
+  const [fillStyle, setFillStyle] = useState('solid');
+  const [backgroundColor, setBackgroundColor] = useState('transparent');
+  const [elements, setElements] = useState([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [currentElement, setCurrentElement] = useState(null);
+  const [history, setHistory] = useState([[]]);
+  const [historyStep, setHistoryStep] = useState(0);
+  const [textInput, setTextInput] = useState('');
+  const [textPosition, setTextPosition] = useState(null);
+  const [fontSize, setFontSize] = useState(20);
+  const [selectedElements, setSelectedElements] = useState([]);
+  
+  // Settings
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [videoQuality, setVideoQuality] = useState('high');
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  
+  // Refs
   const mediaRecorderRef = useRef(null);
-  const streamRef = useRef(null);
-  const cameraStreamRef = useRef(null);
-  const videoPreviewRef = useRef(null);
+  const screenStreamRef = useRef(null);
   const cameraVideoRef = useRef(null);
+  const recordedVideoRef = useRef(null);
   const timerRef = useRef(null);
-  const canvasRef = useRef(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
+  const whiteboardCanvasRef = useRef(null);
+  const areaSelectionRef = useRef(null);
+  const combinedCanvasRef = useRef(null);
+  const animationFrameRef = useRef(null);
 
-  // Timer effect
+  // Timer
   useEffect(() => {
     if (isRecording && !isPaused) {
       timerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
     } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isRecording, isPaused]);
 
-  // Format time
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      stopAllStreams();
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
+  // Close quality menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (showQualityMenu && !e.target.closest('.quality-menu-container')) {
+        setShowQualityMenu(false);
+      }
+    };
+    if (showQualityMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showQualityMenu]);
+
+  const stopAllStreams = () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
+      screenStreamRef.current = null;
+    }
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+  };
+
   const formatTime = (seconds) => {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
@@ -59,17 +113,18 @@ const ScreenRecorder = () => {
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Start camera
+  // Camera functions
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           width: { ideal: 1280 },
-          height: { ideal: 720 }
+          height: { ideal: 720 },
+          facingMode: 'user'
         }, 
         audio: false 
       });
-      cameraStreamRef.current = stream;
+      setCameraStream(stream);
       if (cameraVideoRef.current) {
         cameraVideoRef.current.srcObject = stream;
       }
@@ -80,89 +135,495 @@ const ScreenRecorder = () => {
     }
   };
 
-  // Stop camera
   const stopCamera = () => {
-    if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach(track => track.stop());
-      cameraStreamRef.current = null;
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
     }
     setShowCamera(false);
   };
 
-  // Start recording
+  // Camera drag handlers
+  const handleCameraMouseDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingCamera(true);
+    dragStartRef.current = {
+      x: e.clientX - cameraPosition.x,
+      y: e.clientY - cameraPosition.y
+    };
+  };
+
+  const handleCameraMouseMove = (e) => {
+    if (isDraggingCamera) {
+      const maxX = window.innerWidth - cameraSize - 20;
+      const maxY = window.innerHeight - cameraSize - 20;
+      setCameraPosition({
+        x: Math.max(20, Math.min(maxX, e.clientX - dragStartRef.current.x)),
+        y: Math.max(20, Math.min(maxY, e.clientY - dragStartRef.current.y))
+      });
+    }
+  };
+
+  const handleCameraMouseUp = () => {
+    setIsDraggingCamera(false);
+  };
+
+  useEffect(() => {
+    if (isDraggingCamera) {
+      window.addEventListener('mousemove', handleCameraMouseMove);
+      window.addEventListener('mouseup', handleCameraMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleCameraMouseMove);
+        window.removeEventListener('mouseup', handleCameraMouseUp);
+      };
+    }
+  }, [isDraggingCamera]);
+
+  // Area selection
+  const startAreaSelection = () => {
+    setIsSelectingArea(true);
+    setSelectionStart(null);
+    setSelectionEnd(null);
+    setSelectedArea(null);
+  };
+
+  const handleAreaMouseDown = (e) => {
+    if (!isSelectingArea) return;
+    const rect = areaSelectionRef.current.getBoundingClientRect();
+    setSelectionStart({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  };
+
+  const handleAreaMouseMove = (e) => {
+    if (!isSelectingArea || !selectionStart) return;
+    const rect = areaSelectionRef.current.getBoundingClientRect();
+    setSelectionEnd({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  };
+
+  const handleAreaMouseUp = (e) => {
+    if (!isSelectingArea || !selectionStart) return;
+    const rect = areaSelectionRef.current.getBoundingClientRect();
+    const end = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    
+    const area = {
+      x: Math.min(selectionStart.x, end.x),
+      y: Math.min(selectionStart.y, end.y),
+      width: Math.abs(end.x - selectionStart.x),
+      height: Math.abs(end.y - selectionStart.y)
+    };
+    
+    if (area.width > 50 && area.height > 50) {
+      setSelectedArea(area);
+      setIsSelectingArea(false);
+    }
+  };
+
+  // Whiteboard drawing
+  const drawElement = (ctx, element) => {
+    ctx.strokeStyle = element.strokeColor;
+    ctx.fillStyle = element.backgroundColor || 'transparent';
+    ctx.lineWidth = element.strokeWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    switch (element.type) {
+      case 'pencil':
+        ctx.beginPath();
+        element.points.forEach((point, index) => {
+          if (index === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        });
+        ctx.stroke();
+        break;
+
+      case 'line':
+        ctx.beginPath();
+        ctx.moveTo(element.x1, element.y1);
+        ctx.lineTo(element.x2, element.y2);
+        ctx.stroke();
+        break;
+
+      case 'arrow':
+        ctx.beginPath();
+        ctx.moveTo(element.x1, element.y1);
+        ctx.lineTo(element.x2, element.y2);
+        ctx.stroke();
+        
+        const angle = Math.atan2(element.y2 - element.y1, element.x2 - element.x1);
+        const arrowLength = 15;
+        ctx.beginPath();
+        ctx.moveTo(element.x2, element.y2);
+        ctx.lineTo(
+          element.x2 - arrowLength * Math.cos(angle - Math.PI / 6),
+          element.y2 - arrowLength * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.moveTo(element.x2, element.y2);
+        ctx.lineTo(
+          element.x2 - arrowLength * Math.cos(angle + Math.PI / 6),
+          element.y2 - arrowLength * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.stroke();
+        break;
+
+      case 'rectangle':
+        if (element.fillStyle === 'solid' && element.backgroundColor !== 'transparent') {
+          ctx.fillRect(element.x, element.y, element.width, element.height);
+        }
+        ctx.strokeRect(element.x, element.y, element.width, element.height);
+        break;
+
+      case 'circle':
+        const radius = Math.sqrt(Math.pow(element.width / 2, 2) + Math.pow(element.height / 2, 2));
+        ctx.beginPath();
+        ctx.arc(element.x + element.width / 2, element.y + element.height / 2, radius, 0, 2 * Math.PI);
+        if (element.fillStyle === 'solid' && element.backgroundColor !== 'transparent') {
+          ctx.fill();
+        }
+        ctx.stroke();
+        break;
+
+      case 'text':
+        ctx.font = `${element.fontSize}px Arial`;
+        ctx.fillStyle = element.strokeColor;
+        ctx.fillText(element.text, element.x, element.y);
+        break;
+    }
+  };
+
+  const renderWhiteboard = () => {
+    const canvas = whiteboardCanvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    elements.forEach(element => drawElement(ctx, element));
+  };
+
+  useEffect(() => {
+    renderWhiteboard();
+  }, [elements]);
+
+  const handleWhiteboardMouseDown = (e) => {
+    if (!showWhiteboard || whiteboardTool === 'select' || whiteboardTool === 'pan') return;
+    
+    const canvas = whiteboardCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
+    setIsDrawing(true);
+    
+    if (whiteboardTool === 'text') {
+      setTextPosition({ x, y });
+      return;
+    }
+    
+    const newElement = {
+      id: Date.now(),
+      type: whiteboardTool,
+      strokeColor,
+      strokeWidth,
+      backgroundColor,
+      fillStyle,
+      fontSize
+    };
+    
+    if (whiteboardTool === 'pencil') {
+      newElement.points = [{ x, y }];
+    } else if (whiteboardTool === 'line' || whiteboardTool === 'arrow') {
+      newElement.x1 = x;
+      newElement.y1 = y;
+      newElement.x2 = x;
+      newElement.y2 = y;
+    } else if (whiteboardTool === 'rectangle' || whiteboardTool === 'circle') {
+      newElement.x = x;
+      newElement.y = y;
+      newElement.width = 0;
+      newElement.height = 0;
+    }
+    
+    setCurrentElement(newElement);
+  };
+
+  const handleWhiteboardMouseMove = (e) => {
+    if (!isDrawing || !currentElement) return;
+    
+    const canvas = whiteboardCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
+    const updated = { ...currentElement };
+    
+    if (whiteboardTool === 'pencil') {
+      updated.points = [...updated.points, { x, y }];
+    } else if (whiteboardTool === 'line' || whiteboardTool === 'arrow') {
+      updated.x2 = x;
+      updated.y2 = y;
+    } else if (whiteboardTool === 'rectangle' || whiteboardTool === 'circle') {
+      updated.width = x - updated.x;
+      updated.height = y - updated.y;
+    }
+    
+    setCurrentElement(updated);
+    setElements([...elements.filter(e => e.id !== updated.id), updated]);
+  };
+
+  const handleWhiteboardMouseUp = () => {
+    if (currentElement && whiteboardTool !== 'text') {
+      const newElements = [...elements.filter(e => e.id !== currentElement.id), currentElement];
+      setElements(newElements);
+      addToHistory(newElements);
+    }
+    setIsDrawing(false);
+    setCurrentElement(null);
+  };
+
+  const handleTextSubmit = () => {
+    if (textInput && textPosition) {
+      const textElement = {
+        id: Date.now(),
+        type: 'text',
+        text: textInput,
+        x: textPosition.x,
+        y: textPosition.y,
+        strokeColor,
+        fontSize
+      };
+      const newElements = [...elements, textElement];
+      setElements(newElements);
+      addToHistory(newElements);
+      setTextInput('');
+      setTextPosition(null);
+    }
+  };
+
+  const addToHistory = (newElements) => {
+    const newHistory = history.slice(0, historyStep + 1);
+    newHistory.push(newElements);
+    setHistory(newHistory);
+    setHistoryStep(newHistory.length - 1);
+  };
+
+  const undo = () => {
+    if (historyStep > 0) {
+      setHistoryStep(historyStep - 1);
+      setElements(history[historyStep - 1]);
+    }
+  };
+
+  const redo = () => {
+    if (historyStep < history.length - 1) {
+      setHistoryStep(historyStep + 1);
+      setElements(history[historyStep + 1]);
+    }
+  };
+
+  const clearWhiteboard = () => {
+    const newElements = [];
+    setElements(newElements);
+    addToHistory(newElements);
+  };
+
+  // Recording
   const startRecording = async () => {
     try {
-      let stream;
+      if (recordingMode === 'area' && !selectedArea) {
+        alert('请先选择要录制的区域');
+        return;
+      }
       
-      if (recordingMode === 'screen') {
-        stream = await navigator.mediaDevices.getDisplayMedia({
+      const qualitySettings = {
+        low: { width: 1280, height: 720, bitrate: 2500000 },
+        medium: { width: 1920, height: 1080, bitrate: 5000000 },
+        high: { width: 1920, height: 1080, bitrate: 8000000 },
+        ultra: { width: 2560, height: 1440, bitrate: 12000000 }
+      };
+      const quality = qualitySettings[videoQuality];
+      
+      let screenStream;
+      if (recordingMode === 'screen' || recordingMode === 'window' || recordingMode === 'area') {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
           video: { 
             cursor: 'always',
-            displaySurface: 'monitor'
+            width: { ideal: quality.width },
+            height: { ideal: quality.height }
           },
-          audio: audioEnabled
-        });
-      } else if (recordingMode === 'window') {
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { 
-            cursor: 'always',
-            displaySurface: 'window'
-          },
-          audio: audioEnabled
-        });
-      } else if (recordingMode === 'area') {
-        // For custom area, we still use display media but will crop in post-processing
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { cursor: 'always' },
-          audio: audioEnabled
-        });
-      } else if (recordingMode === 'camera') {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: videoEnabled,
           audio: audioEnabled
         });
       }
 
-      streamRef.current = stream;
+      let audioStream = null;
+      if (micEnabled) {
+        try {
+          audioStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+        } catch (err) {
+          console.warn('Microphone access denied:', err);
+        }
+      }
+
+      screenStreamRef.current = screenStream;
       
-      const options = { mimeType: 'video/webm;codecs=vp8,opus' };
-      const mediaRecorder = new MediaRecorder(stream, options);
+      const canvas = document.createElement('canvas');
+      canvas.width = quality.width;
+      canvas.height = quality.height;
+      combinedCanvasRef.current = canvas;
+      
+      const ctx = canvas.getContext('2d');
+      const screenVideo = document.createElement('video');
+      screenVideo.srcObject = screenStream;
+      screenVideo.muted = true;
+      await screenVideo.play();
+      
+      let cameraVideo = null;
+      if (showCamera && cameraStream) {
+        cameraVideo = document.createElement('video');
+        cameraVideo.srcObject = cameraStream;
+        cameraVideo.muted = true;
+        await cameraVideo.play();
+      }
+      
+      const whiteboardCanvas = whiteboardCanvasRef.current;
+      
+      const drawFrame = () => {
+        if (screenVideo.paused || screenVideo.ended) return;
+        
+        // Draw screen
+        if (recordingMode === 'area' && selectedArea) {
+          const scaleX = screenVideo.videoWidth / window.innerWidth;
+          const scaleY = screenVideo.videoHeight / window.innerHeight;
+          ctx.drawImage(
+            screenVideo,
+            selectedArea.x * scaleX,
+            selectedArea.y * scaleY,
+            selectedArea.width * scaleX,
+            selectedArea.height * scaleY,
+            0, 0, canvas.width, canvas.height
+          );
+        } else {
+          ctx.drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
+        }
+        
+        // Draw camera
+        if (cameraVideo && !cameraVideo.paused) {
+          const scaleX = canvas.width / window.innerWidth;
+          const scaleY = canvas.height / window.innerHeight;
+          const camX = cameraPosition.x * scaleX;
+          const camY = cameraPosition.y * scaleY;
+          const camSize = cameraSize * Math.min(scaleX, scaleY);
+          
+          ctx.save();
+          if (cameraShape === 'circle') {
+            ctx.beginPath();
+            ctx.arc(camX + camSize/2, camY + camSize/2, camSize/2, 0, Math.PI * 2);
+            ctx.clip();
+          }
+          ctx.drawImage(cameraVideo, camX, camY, camSize, camSize);
+          ctx.restore();
+          
+          ctx.strokeStyle = isRecording ? '#ff4757' : '#4ecdc4';
+          ctx.lineWidth = 4;
+          if (cameraShape === 'circle') {
+            ctx.beginPath();
+            ctx.arc(camX + camSize/2, camY + camSize/2, camSize/2, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(camX, camY, camSize, camSize);
+          }
+        }
+        
+        // Draw whiteboard
+        if (showWhiteboard && whiteboardCanvas) {
+          ctx.drawImage(whiteboardCanvas, 0, 0, canvas.width, canvas.height);
+        }
+        
+        animationFrameRef.current = requestAnimationFrame(drawFrame);
+      };
+      
+      drawFrame();
+      
+      const canvasStream = canvas.captureStream(30);
+      
+      if (audioStream) {
+        audioStream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+      }
+      
+      const systemAudioTracks = screenStream.getAudioTracks();
+      if (systemAudioTracks.length > 0) {
+        systemAudioTracks.forEach(track => canvasStream.addTrack(track));
+      }
+      
+      const options = { 
+        mimeType: 'video/webm;codecs=vp9,opus',
+        videoBitsPerSecond: quality.bitrate
+      };
+      
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'video/webm;codecs=vp8,opus';
+      }
+      
+      const mediaRecorder = new MediaRecorder(canvasStream, options);
       mediaRecorderRef.current = mediaRecorder;
 
       const chunks = [];
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
+        if (event.data?.size > 0) chunks.push(event.data);
       };
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunks, { type: 'video/webm' });
         setRecordedChunks([blob]);
+        if (recordedVideoRef.current) {
+          recordedVideoRef.current.src = URL.createObjectURL(blob);
+        }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(100);
       setIsRecording(true);
       setRecordingTime(0);
+      
     } catch (err) {
-      console.error('Error starting recording:', err);
-      alert('无法开始录制，请检查权限设置');
+      console.error('Recording error:', err);
+      alert('录制失败: ' + err.message);
+      stopAllStreams();
     }
   };
 
-  // Stop recording
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    if (mediaRecorderRef.current?.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
     }
+    stopAllStreams();
     setIsRecording(false);
     setIsPaused(false);
   };
 
-  // Pause/Resume recording
   const togglePause = () => {
     if (mediaRecorderRef.current) {
       if (isPaused) {
@@ -175,137 +636,79 @@ const ScreenRecorder = () => {
     }
   };
 
-  // Download recording
   const downloadRecording = () => {
     if (recordedChunks.length > 0) {
       const blob = recordedChunks[0];
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `recording-${Date.now()}.webm`;
+      const qualityLabels = { low: '720p', medium: '1080p', high: '1080p-HQ', ultra: '1440p' };
+      a.download = `recording-${qualityLabels[videoQuality]}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      setShowQualityMenu(false);
     }
   };
 
-  // Delete recording
   const deleteRecording = () => {
+    if (recordedVideoRef.current) recordedVideoRef.current.src = '';
     setRecordedChunks([]);
-    setRecordingTime(0);
   };
 
-  // Camera drag handlers
-  const handleCameraMouseDown = (e) => {
-    setIsDraggingCamera(true);
-    dragStartRef.current = {
-      x: e.clientX - cameraPosition.x,
-      y: e.clientY - cameraPosition.y
-    };
-  };
-
-  const handleMouseMove = (e) => {
-    if (isDraggingCamera) {
-      setCameraPosition({
-        x: e.clientX - dragStartRef.current.x,
-        y: e.clientY - dragStartRef.current.y
-      });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDraggingCamera(false);
-  };
-
-  useEffect(() => {
-    if (isDraggingCamera) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      return () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-      };
-    }
-  }, [isDraggingCamera]);
-
-  // Generate flowchart from AI
-  const generateFlowchart = () => {
-    // Simulated AI-generated flowchart
-    const nodes = [
-      { id: 1, text: '开始', x: 200, y: 50, type: 'start' },
-      { id: 2, text: aiPrompt || '处理步骤', x: 200, y: 150, type: 'process' },
-      { id: 3, text: '决策点', x: 200, y: 250, type: 'decision' },
-      { id: 4, text: '结束', x: 200, y: 350, type: 'end' }
-    ];
-    setFlowchartData(nodes);
-  };
+  const colors = ['#000000', '#ff4757', '#4ecdc4', '#f7b731', '#5f27cd', '#1e90ff', '#2ed573', '#ff6348'];
+  const strokeWidths = [1, 2, 4, 8, 12];
 
   return (
-    <div 
-      className="screen-recorder"
-      style={{
-        background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%)',
-        minHeight: '100vh',
-        color: '#fff',
-        fontFamily: '"Space Mono", monospace',
-        position: 'relative',
-        overflow: 'hidden'
-      }}
-    >
-      {/* Background decoration */}
+    <div style={{
+      background: 'linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%)',
+      minHeight: '100vh',
+      color: '#fff',
+      fontFamily: '"Inter", sans-serif',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
       <div style={{
         position: 'absolute',
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundImage: `
-          radial-gradient(circle at 20% 30%, rgba(255, 71, 87, 0.1) 0%, transparent 50%),
-          radial-gradient(circle at 80% 70%, rgba(78, 205, 196, 0.1) 0%, transparent 50%)
-        `,
+        backgroundImage: `radial-gradient(circle at 20% 30%, rgba(255, 71, 87, 0.1) 0%, transparent 50%),
+          radial-gradient(circle at 80% 70%, rgba(78, 205, 196, 0.1) 0%, transparent 50%)`,
         pointerEvents: 'none'
       }} />
 
-      <div style={{ position: 'relative', zIndex: 1, padding: '40px' }}>
+      <div style={{ position: 'relative', zIndex: 1, padding: '20px' }}>
         {/* Header */}
         <header style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: '40px',
-          borderBottom: '2px solid rgba(255, 255, 255, 0.1)',
-          paddingBottom: '20px'
+          marginBottom: '20px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          paddingBottom: '15px'
         }}>
-          <div>
-            <h1 style={{
-              fontSize: '42px',
-              fontWeight: 700,
-              margin: 0,
-              background: 'linear-gradient(90deg, #ff4757, #4ecdc4)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              letterSpacing: '-1px'
-            }}>
-              RecStudio
-            </h1>
-            <p style={{ 
-              margin: '8px 0 0 0', 
-              opacity: 0.6, 
-              fontSize: '14px',
-              letterSpacing: '2px'
-            }}>
-              专业录屏工具
-            </p>
-          </div>
+          <h1 style={{
+            fontSize: '32px',
+            fontWeight: 700,
+            margin: 0,
+            background: 'linear-gradient(90deg, #ff4757, #4ecdc4)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent'
+          }}>
+            RecStudio Pro
+          </h1>
           
           {isRecording && (
             <div style={{
-              fontSize: '36px',
+              fontSize: '32px',
               fontWeight: 700,
               color: '#ff4757',
               display: 'flex',
               alignItems: 'center',
-              gap: '15px',
-              animation: 'pulse 2s ease-in-out infinite'
+              gap: '12px'
             }}>
               <div style={{
                 width: '12px',
@@ -319,30 +722,23 @@ const ScreenRecorder = () => {
           )}
         </header>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '30px' }}>
-          {/* Left Panel - Controls */}
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px' }}>
+          {/* Control Panel */}
           <div style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            backdropFilter: 'blur(10px)',
-            borderRadius: '20px',
-            padding: '30px',
-            border: '1px solid rgba(255, 255, 255, 0.1)'
+            background: 'rgba(255, 255, 255, 0.03)',
+            backdropFilter: 'blur(20px)',
+            borderRadius: '12px',
+            padding: '20px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            height: 'fit-content'
           }}>
-            <h2 style={{ 
-              fontSize: '20px', 
-              marginBottom: '25px',
-              fontWeight: 600,
-              letterSpacing: '1px'
-            }}>
-              录制模式
-            </h2>
+            <h3 style={{ fontSize: '11px', marginBottom: '12px', textTransform: 'uppercase', opacity: 0.5, letterSpacing: '1px' }}>录制模式</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '30px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
               {[
                 { id: 'screen', icon: Monitor, label: '整个屏幕' },
-                { id: 'window', icon: Maximize, label: '选定窗口' },
-                { id: 'area', icon: Square, label: '自定义区域' },
-                { id: 'camera', icon: Camera, label: '摄像头' }
+                { id: 'window', icon: Maximize, label: '窗口' },
+                { id: 'area', icon: Minimize2, label: '自定义区域' }
               ].map(mode => (
                 <button
                   key={mode.id}
@@ -351,262 +747,205 @@ const ScreenRecorder = () => {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '12px',
-                    padding: '15px 20px',
-                    background: recordingMode === mode.id 
-                      ? 'linear-gradient(135deg, #ff4757, #ff6b81)' 
-                      : 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid ' + (recordingMode === mode.id ? '#ff4757' : 'rgba(255, 255, 255, 0.1)'),
-                    borderRadius: '12px',
+                    gap: '10px',
+                    padding: '10px 14px',
+                    background: recordingMode === mode.id ? 'linear-gradient(135deg, #ff4757, #ff6b81)' : 'rgba(255, 255, 255, 0.05)',
+                    border: 'none',
+                    borderRadius: '8px',
                     color: '#fff',
-                    fontSize: '14px',
+                    fontSize: '12px',
                     cursor: isRecording ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.3s ease',
                     fontFamily: 'inherit',
-                    opacity: isRecording && recordingMode !== mode.id ? 0.5 : 1
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isRecording) {
-                      e.currentTarget.style.transform = 'translateX(5px)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateX(0)';
+                    opacity: isRecording && recordingMode !== mode.id ? 0.4 : 1
                   }}
                 >
-                  <mode.icon size={20} />
-                  <span>{mode.label}</span>
+                  <mode.icon size={14} />
+                  {mode.label}
                 </button>
               ))}
             </div>
 
-            <h2 style={{ 
-              fontSize: '20px', 
-              marginBottom: '25px',
-              fontWeight: 600,
-              letterSpacing: '1px'
-            }}>
-              功能选项
-            </h2>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              {/* Audio toggle */}
+            {recordingMode === 'area' && !isRecording && (
               <button
-                onClick={() => setAudioEnabled(!audioEnabled)}
-                disabled={isRecording}
+                onClick={startAreaSelection}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '15px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '12px',
+                  width: '100%',
+                  padding: '10px',
+                  marginBottom: '15px',
+                  background: selectedArea ? 'rgba(78, 205, 196, 0.2)' : 'linear-gradient(135deg, #4ecdc4, #44a3d5)',
+                  border: selectedArea ? '1px solid #4ecdc4' : 'none',
+                  borderRadius: '8px',
                   color: '#fff',
-                  cursor: isRecording ? 'not-allowed' : 'pointer',
-                  fontFamily: 'inherit',
-                  fontSize: '14px'
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  {audioEnabled ? <Mic size={18} /> : <MicOff size={18} />}
-                  音频录制
-                </span>
-                <div style={{
-                  width: '50px',
-                  height: '26px',
-                  background: audioEnabled ? '#4ecdc4' : 'rgba(255, 255, 255, 0.2)',
-                  borderRadius: '13px',
-                  position: 'relative',
-                  transition: 'all 0.3s ease'
-                }}>
-                  <div style={{
-                    width: '22px',
-                    height: '22px',
-                    background: '#fff',
-                    borderRadius: '50%',
-                    position: 'absolute',
-                    top: '2px',
-                    left: audioEnabled ? '26px' : '2px',
-                    transition: 'all 0.3s ease'
-                  }} />
-                </div>
-              </button>
-
-              {/* Video toggle */}
-              <button
-                onClick={() => setVideoEnabled(!videoEnabled)}
-                disabled={isRecording}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '15px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  cursor: isRecording ? 'not-allowed' : 'pointer',
-                  fontFamily: 'inherit',
-                  fontSize: '14px'
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  {videoEnabled ? <Video size={18} /> : <VideoOff size={18} />}
-                  视频录制
-                </span>
-                <div style={{
-                  width: '50px',
-                  height: '26px',
-                  background: videoEnabled ? '#4ecdc4' : 'rgba(255, 255, 255, 0.2)',
-                  borderRadius: '13px',
-                  position: 'relative',
-                  transition: 'all 0.3s ease'
-                }}>
-                  <div style={{
-                    width: '22px',
-                    height: '22px',
-                    background: '#fff',
-                    borderRadius: '50%',
-                    position: 'absolute',
-                    top: '2px',
-                    left: videoEnabled ? '26px' : '2px',
-                    transition: 'all 0.3s ease'
-                  }} />
-                </div>
-              </button>
-
-              {/* Camera overlay */}
-              <button
-                onClick={() => showCamera ? stopCamera() : startCamera()}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '15px',
-                  background: showCamera ? 'linear-gradient(135deg, #4ecdc4, #44a3d5)' : 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid ' + (showCamera ? '#4ecdc4' : 'rgba(255, 255, 255, 0.1)'),
-                  borderRadius: '12px',
-                  color: '#fff',
+                  fontSize: '11px',
                   cursor: 'pointer',
                   fontFamily: 'inherit',
-                  fontSize: '14px'
+                  fontWeight: 600
                 }}
               >
-                <Camera size={18} />
-                {showCamera ? '关闭摄像头' : '打开摄像头'}
+                {selectedArea ? '✓ 区域已选择 - 点击重选' : '🖱️ 选择录制区域'}
+              </button>
+            )}
+
+            <h3 style={{ fontSize: '11px', marginBottom: '12px', marginTop: '20px', textTransform: 'uppercase', opacity: 0.5, letterSpacing: '1px' }}>选项</h3>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '15px' }}>
+              <div style={{
+                padding: '10px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '8px'
+              }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '11px', opacity: 0.7 }}>录制质量</label>
+                <select
+                  value={videoQuality}
+                  onChange={(e) => setVideoQuality(e.target.value)}
+                  disabled={isRecording}
+                  style={{
+                    width: '100%',
+                    padding: '6px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '11px',
+                    cursor: isRecording ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit'
+                  }}
+                >
+                  <option value="low" style={{ background: '#1a1a2e' }}>低清 720p</option>
+                  <option value="medium" style={{ background: '#1a1a2e' }}>标清 1080p</option>
+                  <option value="high" style={{ background: '#1a1a2e' }}>高清 1080p</option>
+                  <option value="ultra" style={{ background: '#1a1a2e' }}>超清 1440p</option>
+                </select>
+              </div>
+
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 10px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '6px',
+                fontSize: '11px',
+                cursor: isRecording ? 'not-allowed' : 'pointer'
+              }}>
+                <span>系统音频</span>
+                <input type="checkbox" checked={audioEnabled} onChange={(e) => setAudioEnabled(e.target.checked)} disabled={isRecording} />
+              </label>
+
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 10px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '6px',
+                fontSize: '11px',
+                cursor: isRecording ? 'not-allowed' : 'pointer'
+              }}>
+                <span><Mic size={12} style={{ marginRight: '6px', display: 'inline' }} />麦克风</span>
+                <input type="checkbox" checked={micEnabled} onChange={(e) => setMicEnabled(e.target.checked)} disabled={isRecording} />
+              </label>
+
+              <button
+                onClick={() => showCamera ? stopCamera() : startCamera()}
+                disabled={isRecording}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px',
+                  background: showCamera ? 'linear-gradient(135deg, #4ecdc4, #44a3d5)' : 'rgba(255, 255, 255, 0.05)',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  cursor: isRecording ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                  fontSize: '11px',
+                  fontWeight: showCamera ? 600 : 400
+                }}
+              >
+                <Camera size={12} />
+                {showCamera ? '摄像头已开启' : '开启摄像头'}
               </button>
 
-              {/* Camera shape toggle */}
-              {showCamera && (
-                <div style={{
-                  padding: '15px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  borderRadius: '12px',
-                  border: '1px solid rgba(255, 255, 255, 0.1)'
-                }}>
-                  <p style={{ fontSize: '12px', marginBottom: '10px', opacity: 0.7 }}>摄像头形状</p>
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button
-                      onClick={() => setCameraShape('circle')}
-                      style={{
-                        flex: 1,
-                        padding: '10px',
-                        background: cameraShape === 'circle' ? '#4ecdc4' : 'rgba(255, 255, 255, 0.1)',
-                        border: 'none',
-                        borderRadius: '8px',
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: '12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '5px'
-                      }}
-                    >
-                      <Circle size={14} />
-                      圆形
-                    </button>
-                    <button
-                      onClick={() => setCameraShape('square')}
-                      style={{
-                        flex: 1,
-                        padding: '10px',
-                        background: cameraShape === 'square' ? '#4ecdc4' : 'rgba(255, 255, 255, 0.1)',
-                        border: 'none',
-                        borderRadius: '8px',
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        fontSize: '12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '5px'
-                      }}
-                    >
-                      <Square size={14} />
-                      方形
-                    </button>
-                  </div>
+              {showCamera && !isRecording && (
+                <div style={{ display: 'flex', gap: '6px', paddingLeft: '8px' }}>
+                  <button
+                    onClick={() => setCameraShape('circle')}
+                    style={{
+                      flex: 1,
+                      padding: '6px',
+                      background: cameraShape === 'circle' ? '#4ecdc4' : 'rgba(255, 255, 255, 0.1)',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: '10px'
+                    }}
+                  >
+                    ⭕ 圆形
+                  </button>
+                  <button
+                    onClick={() => setCameraShape('square')}
+                    style={{
+                      flex: 1,
+                      padding: '6px',
+                      background: cameraShape === 'square' ? '#4ecdc4' : 'rgba(255, 255, 255, 0.1)',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: '10px'
+                    }}
+                  >
+                    ⬜ 方形
+                  </button>
                 </div>
               )}
 
-              {/* Whiteboard */}
               <button
                 onClick={() => setShowWhiteboard(!showWhiteboard)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px',
-                  padding: '15px',
+                  gap: '8px',
+                  padding: '10px',
                   background: showWhiteboard ? 'linear-gradient(135deg, #f7b731, #f79f1f)' : 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid ' + (showWhiteboard ? '#f7b731' : 'rgba(255, 255, 255, 0.1)'),
-                  borderRadius: '12px',
+                  border: 'none',
+                  borderRadius: '6px',
                   color: '#fff',
                   cursor: 'pointer',
                   fontFamily: 'inherit',
-                  fontSize: '14px'
+                  fontSize: '11px',
+                  fontWeight: showWhiteboard ? 600 : 400
                 }}
               >
-                <Edit3 size={18} />
-                {showWhiteboard ? '关闭白板' : '打开白板'}
+                <Edit3 size={12} />
+                {showWhiteboard ? '白板已开启' : '开启白板'}
               </button>
             </div>
 
-            {/* Recording controls */}
-            <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {!isRecording ? (
                 <button
                   onClick={startRecording}
                   style={{
+                    padding: '12px',
+                    background: 'linear-gradient(135deg, #ff4757, #ff6b81)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '12px',
-                    padding: '18px',
-                    background: 'linear-gradient(135deg, #ff4757, #ff6b81)',
-                    border: 'none',
-                    borderRadius: '12px',
-                    color: '#fff',
-                    fontSize: '16px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    transition: 'all 0.3s ease',
-                    boxShadow: '0 10px 30px rgba(255, 71, 87, 0.3)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 15px 40px rgba(255, 71, 87, 0.4)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 10px 30px rgba(255, 71, 87, 0.3)';
+                    gap: '8px',
+                    boxShadow: '0 6px 20px rgba(255, 71, 87, 0.4)'
                   }}
                 >
-                  <Play size={20} fill="#fff" />
+                  <Play size={16} fill="#fff" />
                   开始录制
                 </button>
               ) : (
@@ -614,479 +953,522 @@ const ScreenRecorder = () => {
                   <button
                     onClick={togglePause}
                     style={{
+                      padding: '12px',
+                      background: isPaused ? 'linear-gradient(135deg, #4ecdc4, #44a3d5)' : 'linear-gradient(135deg, #f7b731, #f79f1f)',
+                      border: 'none',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '12px',
-                      padding: '18px',
-                      background: isPaused ? 'linear-gradient(135deg, #4ecdc4, #44a3d5)' : 'linear-gradient(135deg, #f7b731, #f79f1f)',
-                      border: 'none',
-                      borderRadius: '12px',
-                      color: '#fff',
-                      fontSize: '16px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      fontFamily: 'inherit'
+                      gap: '8px'
                     }}
                   >
-                    {isPaused ? <Play size={20} fill="#fff" /> : <Pause size={20} />}
-                    {isPaused ? '继续' : '暂停'}
+                    {isPaused ? <><Play size={16} fill="#fff" />继续</> : <><Pause size={16} />暂停</>}
                   </button>
                   <button
                     onClick={stopRecording}
                     style={{
+                      padding: '12px',
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '12px',
-                      padding: '18px',
-                      background: 'rgba(255, 255, 255, 0.1)',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      borderRadius: '12px',
-                      color: '#fff',
-                      fontSize: '16px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      fontFamily: 'inherit'
+                      gap: '8px'
                     }}
                   >
-                    <Square size={20} />
-                    停止录制
+                    <Square size={16} fill="#fff" />
+                    停止
                   </button>
                 </>
               )}
 
-              {recordedChunks.length > 0 && (
-                <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
-                  <button
-                    onClick={downloadRecording}
-                    style={{
-                      flex: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      padding: '15px',
-                      background: 'linear-gradient(135deg, #4ecdc4, #44a3d5)',
-                      border: 'none',
-                      borderRadius: '12px',
-                      color: '#fff',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit'
-                    }}
-                  >
-                    <Download size={18} />
-                    下载
-                  </button>
+              {recordedChunks.length > 0 && !isRecording && (
+                <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                  <div className="quality-menu-container" style={{ flex: 1, position: 'relative' }}>
+                    <button
+                      onClick={() => setShowQualityMenu(!showQualityMenu)}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        background: 'linear-gradient(135deg, #4ecdc4, #44a3d5)',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: '#fff',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Download size={12} />
+                      下载
+                      <ChevronDown size={12} />
+                    </button>
+                    
+                    {showQualityMenu && (
+                      <div style={{
+                        position: 'absolute',
+                        bottom: '100%',
+                        left: 0,
+                        right: 0,
+                        marginBottom: '6px',
+                        background: 'rgba(26, 26, 46, 0.98)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '6px',
+                        padding: '6px',
+                        zIndex: 1000,
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
+                      }}>
+                        {[
+                          { value: 'low', label: '720p' },
+                          { value: 'medium', label: '1080p' },
+                          { value: 'high', label: '1080p HQ' },
+                          { value: 'ultra', label: '1440p' }
+                        ].map(q => (
+                          <button
+                            key={q.value}
+                            onClick={() => {
+                              setVideoQuality(q.value);
+                              downloadRecording();
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              background: videoQuality === q.value ? 'rgba(78, 205, 196, 0.2)' : 'transparent',
+                              border: videoQuality === q.value ? '1px solid #4ecdc4' : '1px solid transparent',
+                              borderRadius: '4px',
+                              color: '#fff',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              marginBottom: '2px',
+                              textAlign: 'center'
+                            }}
+                          >
+                            {q.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <button
                     onClick={deleteRecording}
                     style={{
-                      flex: 1,
+                      padding: '10px',
+                      background: 'rgba(255, 71, 87, 0.2)',
+                      border: '1px solid rgba(255, 71, 87, 0.4)',
+                      borderRadius: '6px',
+                      color: '#ff6b81',
+                      cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      padding: '15px',
-                      background: 'rgba(255, 71, 87, 0.2)',
-                      border: '1px solid rgba(255, 71, 87, 0.5)',
-                      borderRadius: '12px',
-                      color: '#ff4757',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit'
+                      justifyContent: 'center'
                     }}
                   >
-                    <Trash2 size={18} />
-                    删除
+                    <Trash2 size={12} />
                   </button>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Right Panel - Preview */}
+          {/* Main Area */}
           <div style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            backdropFilter: 'blur(10px)',
-            borderRadius: '20px',
-            padding: '30px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            backdropFilter: 'blur(20px)',
+            borderRadius: '12px',
+            padding: '20px',
             border: '1px solid rgba(255, 255, 255, 0.1)',
-            position: 'relative',
-            minHeight: '600px',
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            minHeight: '600px'
           }}>
-            <h2 style={{ 
-              fontSize: '20px', 
-              marginBottom: '25px',
-              fontWeight: 600,
-              letterSpacing: '1px'
-            }}>
-              预览区域
-            </h2>
-
-            <div style={{
-              flex: 1,
-              background: 'rgba(0, 0, 0, 0.3)',
-              borderRadius: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative',
-              overflow: 'hidden',
-              border: '2px dashed rgba(255, 255, 255, 0.2)'
-            }}>
-              {recordedChunks.length === 0 ? (
-                <div style={{ textAlign: 'center', opacity: 0.5 }}>
-                  <Monitor size={64} style={{ marginBottom: '20px', opacity: 0.5 }} />
-                  <p style={{ fontSize: '18px' }}>准备开始录制</p>
-                  <p style={{ fontSize: '14px', marginTop: '10px' }}>选择录制模式并点击开始录制按钮</p>
+            {recordedChunks.length === 0 ? (
+              <div style={{ flex: 1, background: '#000', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
+                <div style={{ textAlign: 'center', opacity: 0.3, zIndex: 1 }}>
+                  <Monitor size={64} strokeWidth={1} />
+                  <p style={{ fontSize: '14px', marginTop: '15px' }}>准备录制</p>
                 </div>
-              ) : (
-                <video
-                  ref={videoPreviewRef}
-                  src={URL.createObjectURL(recordedChunks[0])}
-                  controls
+                
+                <canvas
+                  ref={whiteboardCanvasRef}
+                  width={1920}
+                  height={1080}
+                  onMouseDown={handleWhiteboardMouseDown}
+                  onMouseMove={handleWhiteboardMouseMove}
+                  onMouseUp={handleWhiteboardMouseUp}
                   style={{
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                    borderRadius: '8px'
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    cursor: showWhiteboard ? (whiteboardTool === 'pan' ? 'grab' : whiteboardTool === 'text' ? 'text' : 'crosshair') : 'default',
+                    pointerEvents: showWhiteboard ? 'auto' : 'none',
+                    zIndex: 2
                   }}
                 />
-              )}
+              </div>
+            ) : (
+              <video
+                ref={recordedVideoRef}
+                controls
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: '8px',
+                  background: '#000'
+                }}
+              />
+            )}
 
-              {/* Camera overlay */}
-              {showCamera && (
-                <div
-                  onMouseDown={handleCameraMouseDown}
-                  style={{
-                    position: 'absolute',
-                    left: `${cameraPosition.x}px`,
-                    top: `${cameraPosition.y}px`,
-                    width: '200px',
-                    height: '200px',
-                    borderRadius: cameraShape === 'circle' ? '50%' : '12px',
-                    overflow: 'hidden',
-                    border: '4px solid #4ecdc4',
-                    boxShadow: '0 10px 40px rgba(78, 205, 196, 0.5)',
-                    cursor: isDraggingCamera ? 'grabbing' : 'grab',
-                    zIndex: 10,
-                    background: '#000'
-                  }}
-                >
-                  <video
-                    ref={cameraVideoRef}
-                    autoPlay
-                    muted
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      transform: backgroundRemoval ? 'scaleX(-1)' : 'none'
-                    }}
-                  />
-                  <div style={{
-                    position: 'absolute',
-                    top: '5px',
-                    right: '5px',
-                    background: 'rgba(0, 0, 0, 0.7)',
-                    borderRadius: '6px',
-                    padding: '5px 8px',
-                    fontSize: '10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px'
-                  }}>
-                    <Move size={12} />
-                    拖动
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Whiteboard panel */}
-            {showWhiteboard && (
+            {showWhiteboard && recordedChunks.length === 0 && (
               <div style={{
-                marginTop: '20px',
-                background: 'rgba(255, 255, 255, 0.95)',
-                borderRadius: '12px',
-                padding: '20px',
-                border: '1px solid rgba(0, 0, 0, 0.1)'
+                marginTop: '15px',
+                padding: '12px',
+                background: '#fff',
+                borderRadius: '8px',
+                display: 'flex',
+                gap: '8px',
+                flexWrap: 'wrap',
+                alignItems: 'center'
               }}>
-                <div style={{ 
-                  display: 'flex', 
-                  gap: '10px', 
-                  marginBottom: '15px',
-                  borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
-                  paddingBottom: '15px'
-                }}>
-                  <button
-                    onClick={() => setWhiteboardMode('text')}
-                    style={{
-                      padding: '8px 15px',
-                      background: whiteboardMode === 'text' ? '#4ecdc4' : 'rgba(0, 0, 0, 0.05)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: whiteboardMode === 'text' ? '#fff' : '#000',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontFamily: 'inherit',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <FileText size={16} />
-                    文本
-                  </button>
-                  <button
-                    onClick={() => setWhiteboardMode('pointer')}
-                    style={{
-                      padding: '8px 15px',
-                      background: whiteboardMode === 'pointer' ? '#4ecdc4' : 'rgba(0, 0, 0, 0.05)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: whiteboardMode === 'pointer' ? '#fff' : '#000',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontFamily: 'inherit',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <Edit3 size={16} />
-                    指示
-                  </button>
-                  <button
-                    onClick={() => setWhiteboardMode('ai')}
-                    style={{
-                      padding: '8px 15px',
-                      background: whiteboardMode === 'ai' ? '#4ecdc4' : 'rgba(0, 0, 0, 0.05)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: whiteboardMode === 'ai' ? '#fff' : '#000',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontFamily: 'inherit',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <Wand2 size={16} />
-                    AI工具
-                  </button>
-                  <button
-                    onClick={() => setWhiteboardMode('embed')}
-                    style={{
-                      padding: '8px 15px',
-                      background: whiteboardMode === 'embed' ? '#4ecdc4' : 'rgba(0, 0, 0, 0.05)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: whiteboardMode === 'embed' ? '#fff' : '#000',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontFamily: 'inherit',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <Globe size={16} />
-                    嵌入
-                  </button>
-                </div>
-
-                {whiteboardMode === 'text' && (
-                  <textarea
-                    value={whiteboardContent}
-                    onChange={(e) => setWhiteboardContent(e.target.value)}
-                    placeholder="在此输入白板内容..."
-                    style={{
-                      width: '100%',
-                      minHeight: '120px',
-                      padding: '12px',
-                      background: '#fff',
-                      border: '1px solid rgba(0, 0, 0, 0.1)',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      fontFamily: 'inherit',
-                      color: '#000',
-                      resize: 'vertical'
-                    }}
-                  />
-                )}
-
-                {whiteboardMode === 'pointer' && (
-                  <div style={{
-                    background: '#fff',
-                    border: '2px dashed rgba(0, 0, 0, 0.2)',
-                    borderRadius: '8px',
-                    minHeight: '120px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#666',
-                    fontSize: '14px'
-                  }}>
-                    使用光标在屏幕上进行指示和讲解
-                  </div>
-                )}
-
-                {whiteboardMode === 'ai' && (
-                  <div>
-                    <div style={{ marginBottom: '15px' }}>
-                      <input
-                        type="text"
-                        value={aiPrompt}
-                        onChange={(e) => setAiPrompt(e.target.value)}
-                        placeholder="输入自然语言描述，AI将生成流程图..."
-                        style={{
-                          width: '100%',
-                          padding: '12px',
-                          background: '#fff',
-                          border: '1px solid rgba(0, 0, 0, 0.1)',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontFamily: 'inherit',
-                          color: '#000'
-                        }}
-                      />
-                    </div>
+                {/* Tools */}
+                <div style={{ display: 'flex', gap: '4px', borderRight: '1px solid #ddd', paddingRight: '8px' }}>
+                  {[
+                    { id: 'select', icon: MousePointer },
+                    { id: 'pan', icon: Hand },
+                    { id: 'pencil', icon: Edit3 },
+                    { id: 'line', icon: Minus },
+                    { id: 'arrow', icon: ArrowRight },
+                    { id: 'rectangle', icon: Square },
+                    { id: 'circle', icon: CircleIcon },
+                    { id: 'text', icon: Type },
+                    { id: 'eraser', icon: Eraser }
+                  ].map(tool => (
                     <button
-                      onClick={generateFlowchart}
+                      key={tool.id}
+                      onClick={() => setWhiteboardTool(tool.id)}
                       style={{
-                        padding: '10px 20px',
-                        background: 'linear-gradient(135deg, #4ecdc4, #44a3d5)',
+                        padding: '6px',
+                        background: whiteboardTool === tool.id ? '#4ecdc4' : '#f5f5f5',
                         border: 'none',
-                        borderRadius: '8px',
-                        color: '#fff',
+                        borderRadius: '4px',
                         cursor: 'pointer',
-                        fontSize: '14px',
-                        fontFamily: 'inherit',
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
+                        alignItems: 'center'
                       }}
                     >
-                      <Workflow size={16} />
-                      生成流程图
+                      <tool.icon size={14} color={whiteboardTool === tool.id ? '#fff' : '#333'} />
                     </button>
-                    
-                    {flowchartData && (
-                      <div style={{
-                        marginTop: '15px',
-                        background: '#f8f9fa',
-                        borderRadius: '8px',
-                        padding: '20px',
-                        minHeight: '200px'
-                      }}>
-                        <svg width="100%" height="400" style={{ background: '#fff', borderRadius: '8px' }}>
-                          {flowchartData.map((node, idx) => (
-                            <g key={node.id}>
-                              {idx < flowchartData.length - 1 && (
-                                <line
-                                  x1={node.x}
-                                  y1={node.y + 30}
-                                  x2={flowchartData[idx + 1].x}
-                                  y2={flowchartData[idx + 1].y - 30}
-                                  stroke="#4ecdc4"
-                                  strokeWidth="2"
-                                  markerEnd="url(#arrowhead)"
-                                />
-                              )}
-                              <rect
-                                x={node.x - 80}
-                                y={node.y - 25}
-                                width="160"
-                                height="50"
-                                fill={node.type === 'start' ? '#4ecdc4' : node.type === 'end' ? '#ff4757' : '#f7b731'}
-                                stroke="#333"
-                                strokeWidth="2"
-                                rx={node.type === 'start' || node.type === 'end' ? '25' : '8'}
-                              />
-                              <text
-                                x={node.x}
-                                y={node.y + 5}
-                                textAnchor="middle"
-                                fill="#fff"
-                                fontSize="14"
-                                fontWeight="600"
-                              >
-                                {node.text}
-                              </text>
-                            </g>
-                          ))}
-                          <defs>
-                            <marker
-                              id="arrowhead"
-                              markerWidth="10"
-                              markerHeight="10"
-                              refX="9"
-                              refY="3"
-                              orient="auto"
-                            >
-                              <polygon points="0 0, 10 3, 0 6" fill="#4ecdc4" />
-                            </marker>
-                          </defs>
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  ))}
+                </div>
 
-                {whiteboardMode === 'embed' && (
-                  <div>
-                    <input
-                      type="text"
-                      value={embeddedUrl}
-                      onChange={(e) => setEmbeddedUrl(e.target.value)}
-                      placeholder="输入要嵌入的网页URL..."
+                {/* Colors */}
+                <div style={{ display: 'flex', gap: '4px', borderRight: '1px solid #ddd', paddingRight: '8px' }}>
+                  {colors.map(color => (
+                    <button
+                      key={color}
+                      onClick={() => setStrokeColor(color)}
                       style={{
-                        width: '100%',
-                        padding: '12px',
-                        background: '#fff',
-                        border: '1px solid rgba(0, 0, 0, 0.1)',
-                        borderRadius: '8px',
-                        fontSize: '14px',
-                        fontFamily: 'inherit',
-                        color: '#000',
-                        marginBottom: '15px'
+                        width: '24px',
+                        height: '24px',
+                        background: color,
+                        border: strokeColor === color ? '2px solid #333' : '1px solid #ddd',
+                        borderRadius: '50%',
+                        cursor: 'pointer',
+                        padding: 0
                       }}
                     />
-                    {embeddedUrl && (
-                      <div style={{
-                        background: '#f8f9fa',
-                        borderRadius: '8px',
-                        padding: '15px',
-                        minHeight: '200px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#666',
-                        fontSize: '14px'
-                      }}>
-                        <Globe size={32} style={{ marginRight: '10px', opacity: 0.5 }} />
-                        嵌入内容: {embeddedUrl}
-                      </div>
-                    )}
-                  </div>
-                )}
+                  ))}
+                </div>
+
+                {/* Stroke widths */}
+                <div style={{ display: 'flex', gap: '4px', borderRight: '1px solid #ddd', paddingRight: '8px' }}>
+                  {strokeWidths.map(width => (
+                    <button
+                      key={width}
+                      onClick={() => setStrokeWidth(width)}
+                      style={{
+                        padding: '6px 10px',
+                        background: strokeWidth === width ? '#4ecdc4' : '#f5f5f5',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        color: strokeWidth === width ? '#fff' : '#333'
+                      }}
+                    >
+                      {width}px
+                    </button>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button onClick={undo} disabled={historyStep <= 0} style={{
+                    padding: '6px',
+                    background: '#f5f5f5',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: historyStep <= 0 ? 'not-allowed' : 'pointer',
+                    opacity: historyStep <= 0 ? 0.5 : 1
+                  }}>
+                    <Undo size={14} color="#333" />
+                  </button>
+                  <button onClick={redo} disabled={historyStep >= history.length - 1} style={{
+                    padding: '6px',
+                    background: '#f5f5f5',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: historyStep >= history.length - 1 ? 'not-allowed' : 'pointer',
+                    opacity: historyStep >= history.length - 1 ? 0.5 : 1
+                  }}>
+                    <Redo size={14} color="#333" />
+                  </button>
+                  <button onClick={clearWhiteboard} style={{
+                    padding: '6px 10px',
+                    background: '#ff4757',
+                    border: 'none',
+                    borderRadius: '4px',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    fontWeight: 600
+                  }}>
+                    清空
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Text input */}
+            {textPosition && (
+              <div style={{
+                position: 'fixed',
+                left: textPosition.x,
+                top: textPosition.y,
+                zIndex: 10000,
+                background: '#fff',
+                padding: '8px',
+                borderRadius: '6px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+              }}>
+                <input
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleTextSubmit()}
+                  autoFocus
+                  placeholder="输入文本..."
+                  style={{
+                    padding: '6px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    minWidth: '150px'
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+                  <button onClick={handleTextSubmit} style={{
+                    flex: 1,
+                    padding: '4px',
+                    background: '#4ecdc4',
+                    border: 'none',
+                    borderRadius: '3px',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '10px'
+                  }}>确定</button>
+                  <button onClick={() => { setTextPosition(null); setTextInput(''); }} style={{
+                    flex: 1,
+                    padding: '4px',
+                    background: '#ddd',
+                    border: 'none',
+                    borderRadius: '3px',
+                    color: '#333',
+                    cursor: 'pointer',
+                    fontSize: '10px'
+                  }}>取消</button>
+                </div>
               </div>
             )}
           </div>
         </div>
       </div>
 
+      {/* Area Selection Overlay */}
+      {isSelectingArea && (
+        <div
+          ref={areaSelectionRef}
+          onMouseDown={handleAreaMouseDown}
+          onMouseMove={handleAreaMouseMove}
+          onMouseUp={handleAreaMouseUp}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.7)',
+            cursor: 'crosshair',
+            zIndex: 10000
+          }}
+        >
+          <div style={{
+            position: 'absolute',
+            top: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#fff',
+            padding: '12px 24px',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: 600,
+            color: '#333',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}>
+            🖱️ 拖动鼠标选择录制区域
+            <button
+              onClick={() => setIsSelectingArea(false)}
+              style={{
+                padding: '4px 10px',
+                background: '#ff4757',
+                border: 'none',
+                borderRadius: '4px',
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              取消
+            </button>
+          </div>
+          
+          {selectionStart && selectionEnd && (
+            <div style={{
+              position: 'absolute',
+              left: Math.min(selectionStart.x, selectionEnd.x),
+              top: Math.min(selectionStart.y, selectionEnd.y),
+              width: Math.abs(selectionEnd.x - selectionStart.x),
+              height: Math.abs(selectionEnd.y - selectionStart.y),
+              border: '3px solid #4ecdc4',
+              background: 'rgba(78, 205, 196, 0.1)',
+              boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)'
+            }}>
+              <div style={{
+                position: 'absolute',
+                bottom: '-35px',
+                right: '0',
+                background: '#4ecdc4',
+                padding: '6px 10px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                color: '#fff'
+              }}>
+                {Math.round(Math.abs(selectionEnd.x - selectionStart.x))} × {Math.round(Math.abs(selectionEnd.y - selectionStart.y))} px
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Camera Overlay */}
+      {showCamera && cameraStream && (
+        <div
+          onMouseDown={handleCameraMouseDown}
+          style={{
+            position: 'fixed',
+            left: `${cameraPosition.x}px`,
+            top: `${cameraPosition.y}px`,
+            width: `${cameraSize}px`,
+            height: `${cameraSize}px`,
+            borderRadius: cameraShape === 'circle' ? '50%' : '8px',
+            overflow: 'hidden',
+            border: isRecording ? '3px solid #ff4757' : '3px solid #4ecdc4',
+            boxShadow: isRecording 
+              ? '0 8px 32px rgba(255, 71, 87, 0.6)' 
+              : '0 8px 32px rgba(78, 205, 196, 0.6)',
+            cursor: isDraggingCamera ? 'grabbing' : 'grab',
+            zIndex: 1000,
+            background: '#000',
+            userSelect: 'none'
+          }}
+        >
+          <video
+            ref={cameraVideoRef}
+            autoPlay
+            muted
+            playsInline
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transform: 'scaleX(-1)'
+            }}
+          />
+          <div style={{
+            position: 'absolute',
+            top: '6px',
+            right: '6px',
+            background: isRecording ? 'rgba(255, 71, 87, 0.9)' : 'rgba(0, 0, 0, 0.7)',
+            borderRadius: '4px',
+            padding: '4px 8px',
+            fontSize: '9px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}>
+            <Move size={8} />
+            拖动
+          </div>
+          {isRecording && (
+            <div style={{
+              position: 'absolute',
+              bottom: '6px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(255, 71, 87, 0.9)',
+              borderRadius: '4px',
+              padding: '3px 6px',
+              fontSize: '8px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px'
+            }}>
+              <div style={{
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                background: '#fff',
+                animation: 'blink 1.5s ease-in-out infinite'
+              }} />
+              REC
+            </div>
+          )}
+        </div>
+      )}
+
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
-        
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.8; }
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         
         @keyframes blink {
           0%, 100% { opacity: 1; }
@@ -1095,16 +1477,24 @@ const ScreenRecorder = () => {
         
         * {
           box-sizing: border-box;
+          margin: 0;
+          padding: 0;
         }
         
-        button:active {
+        button:hover:not(:disabled) {
+          filter: brightness(1.1);
+        }
+        
+        button:active:not(:disabled) {
           transform: scale(0.98);
         }
         
-        input:focus, textarea:focus {
+        input, select {
+          font-family: inherit;
+        }
+        
+        input:focus, select:focus {
           outline: none;
-          border-color: #4ecdc4;
-          box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.1);
         }
       `}</style>
     </div>

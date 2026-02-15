@@ -2,7 +2,7 @@
   "name": "screen-recorder",
   "version": "1.0.0",
   "private": true,
-  "homepage": "https://lm16688.github.io/screen-recorder/",
+  "homepage": "https://lm16688.github.io/screen-recorder",
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
